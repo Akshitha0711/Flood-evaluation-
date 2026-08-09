@@ -36,6 +36,9 @@ roads and finds the safest path to safety.
 - Real road network of Indiranagar, Bangalore
 - Safe evacuation route vs normal shortest route
 
+##  Live Demo
+👉 [Click here to open the app](https://gvzxxkgvtg8uuzmrhahd3p.streamlit.app/)
+
 ##  Author
 Akshitha R — BCA Student, S-VYASA University Bangalore  
 Summer Internship Project 2026
