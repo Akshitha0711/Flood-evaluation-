@@ -136,7 +136,7 @@ if st.session_state.map_html is not None:
     col1, col2 = st.columns([3, 1])
     with col1:
         st.subheader("🗺️ Evacuation Map")
-        st_folium(st.session_state.map_html, width=750, height=500)
+        st_folium(st.session_state.map_html, width=750, height=500, returned_objects=[])
     with col2:
         st.subheader("📊 Risk Summary")
         overall = st.session_state.risk
@@ -152,4 +152,4 @@ if st.session_state.map_html is not None:
 else:
     st.info("👈 Adjust flood conditions on the left sidebar, then click the button!")
     m = folium.Map(location=[12.9784, 77.6408], zoom_start=14)
-    st_folium(m, width=750, height=400)
+    st_folium(m, width=750, height=400, returned_objects=[])
