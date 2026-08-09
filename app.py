@@ -7,7 +7,6 @@ import joblib
 import pandas as pd
 import random
 
-# ── PAGE CONFIG ──────────────────────────────────
 st.set_page_config(
     page_title="Flood Evacuation Route Optimizer",
     page_icon="🌊",
@@ -17,21 +16,23 @@ st.set_page_config(
 st.title("🌊 Flood Evacuation Route Optimizer")
 st.markdown("Find the **safest evacuation route** during floods using ML + GIS")
 
-# ── LOAD MODEL ───────────────────────────────────
 @st.cache_resource
 def load_model():
     return joblib.load("model_small.pkl")
 
 model = load_model()
 
-# ── SIDEBAR ──────────────────────────────────────
-st.sidebar.header("⚙️ Flood Conditions")
+@st.cache_resource
+def load_graph():
+    return ox.graph_from_place("Indiranagar, Bangalore, India",
+                                network_type="drive")
 
-monsoon  = st.sidebar.slider("Monsoon Intensity",   1, 10, 5)
-drainage = st.sidebar.slider("Drainage Quality",    1, 10, 5)
-urbanize = st.sidebar.slider("Urbanization Level",  1, 10, 5)
-deforest = st.sidebar.slider("Deforestation",       1, 10, 3)
-infra    = st.sidebar.slider("Infrastructure Decay",1, 10, 4)
+st.sidebar.header("⚙️ Flood Conditions")
+monsoon  = st.sidebar.slider("Monsoon Intensity",    1, 10, 5)
+drainage = st.sidebar.slider("Drainage Quality",     1, 10, 5)
+urbanize = st.sidebar.slider("Urbanization Level",   1, 10, 5)
+deforest = st.sidebar.slider("Deforestation",        1, 10, 3)
+infra    = st.sidebar.slider("Infrastructure Decay", 1, 10, 4)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Legend**")
@@ -40,10 +41,9 @@ st.sidebar.markdown("🟢 Green = Safe route")
 st.sidebar.markdown("🔴 Red roads = High flood risk")
 st.sidebar.markdown("🟠 Orange = Medium risk")
 
-# ── PREDICT FLOOD RISK ───────────────────────────
 def predict_risk(noise=0):
     sample = pd.DataFrame([{
-        "MonsoonIntensity":                monsoon + noise,
+        "MonsoonIntensity":                min(10, max(1, monsoon + noise)),
         "TopographyDrainage":              drainage,
         "RiverManagement":                 random.randint(2, 7),
         "Deforestation":                   deforest,
@@ -63,18 +63,20 @@ def predict_risk(noise=0):
         "WetlandLoss":                     random.randint(2, 8),
         "InadequatePlanning":              random.randint(2, 8),
         "PoliticalFactors":                random.randint(2, 7),
-    }]).clip(1, 10)
+    }])
     return model.predict(sample)[0]
 
-# ── LOAD ROAD MAP ────────────────────────────────
-@st.cache_resource
-def load_graph():
-    return ox.graph_from_place("Indiranagar, Bangalore, India",
-                                network_type="drive")
+# ── SESSION STATE ────────────────────────────────
+if "map_html" not in st.session_state:
+    st.session_state.map_html = None
+if "normal_steps" not in st.session_state:
+    st.session_state.normal_steps = None
+if "safe_steps" not in st.session_state:
+    st.session_state.safe_steps = None
+if "risk" not in st.session_state:
+    st.session_state.risk = None
 
-# ── MAIN BUTTON ──────────────────────────────────
 if st.button("🔍 Find Safe Evacuation Route", use_container_width=True):
-
     with st.spinner("Loading road network..."):
         G = load_graph()
 
@@ -85,26 +87,22 @@ if st.button("🔍 Find Safe Evacuation Route", use_container_width=True):
             data["flood_risk"]  = risk
             data["safe_weight"] = data.get("length", 100) * (1 + risk * 5)
 
-    # Pick start and end
     nodes      = list(G.nodes())
     start_node = nodes[10]
     end_node   = nodes[200]
 
-    # Find routes
     try:
         normal_route = nx.shortest_path(G, start_node, end_node, weight="length")
         safe_route   = nx.shortest_path(G, start_node, end_node, weight="safe_weight")
     except nx.NetworkXNoPath:
-        st.error("No path found. Please try again.")
+        st.error("No path found.")
         st.stop()
 
-    # ── BUILD FOLIUM MAP ─────────────────────────
     center = ox.geocode("Indiranagar, Bangalore, India")
     m = folium.Map(location=center, zoom_start=15)
 
-    # Color roads by flood risk
     for u, v, data in G.edges(data=True):
-        risk = data.get("flood_risk", 0.5)
+        risk  = data.get("flood_risk", 0.5)
         color = "#FF4444" if risk > 0.55 else "#FFA500" if risk > 0.45 else "#44BB44"
         try:
             y1, x1 = G.nodes[u]["y"], G.nodes[u]["x"]
@@ -114,47 +112,43 @@ if st.button("🔍 Find Safe Evacuation Route", use_container_width=True):
         except:
             pass
 
-    # Draw normal route (blue)
     normal_coords = [[G.nodes[n]["y"], G.nodes[n]["x"]] for n in normal_route]
-    folium.PolyLine(normal_coords, color="blue",
-                    weight=6, opacity=0.8,
-                    tooltip="Normal Shortest Route").add_to(m)
+    safe_coords   = [[G.nodes[n]["y"], G.nodes[n]["x"]] for n in safe_route]
 
-    # Draw safe route (green)
-    safe_coords = [[G.nodes[n]["y"], G.nodes[n]["x"]] for n in safe_route]
-    folium.PolyLine(safe_coords, color="green",
-                    weight=6, opacity=0.9,
-                    tooltip="Safe Evacuation Route").add_to(m)
+    folium.PolyLine(normal_coords, color="blue",  weight=6,
+                    opacity=0.8, tooltip="Normal Route").add_to(m)
+    folium.PolyLine(safe_coords,   color="green", weight=6,
+                    opacity=0.9, tooltip="Safe Route").add_to(m)
 
-    # Markers
-    folium.Marker(normal_coords[0],
-                  tooltip="START",
+    folium.Marker(normal_coords[0],  tooltip="START",
                   icon=folium.Icon(color="green", icon="play")).add_to(m)
-    folium.Marker(normal_coords[-1],
-                  tooltip="SAFE ZONE",
+    folium.Marker(normal_coords[-1], tooltip="SAFE ZONE",
                   icon=folium.Icon(color="red", icon="flag")).add_to(m)
 
-    # ── DISPLAY ──────────────────────────────────
-    col1, col2 = st.columns([3, 1])
+    # Save to session state
+    st.session_state.map_html     = m
+    st.session_state.normal_steps = len(normal_route)
+    st.session_state.safe_steps   = len(safe_route)
+    st.session_state.risk         = predict_risk()
 
+# ── DISPLAY ──────────────────────────────────────
+if st.session_state.map_html is not None:
+    col1, col2 = st.columns([3, 1])
     with col1:
         st.subheader("🗺️ Evacuation Map")
-        st_folium(m, width=750, height=500)
-
+        st_folium(st.session_state.map_html, width=750, height=500)
     with col2:
         st.subheader("📊 Risk Summary")
-        overall = predict_risk()
+        overall = st.session_state.risk
         if overall > 0.55:
             st.error(f"🔴 HIGH RISK\n\n{overall:.2%} flood probability")
         elif overall > 0.45:
             st.warning(f"🟡 MEDIUM RISK\n\n{overall:.2%} flood probability")
         else:
             st.success(f"🟢 LOW RISK\n\n{overall:.2%} flood probability")
-
         st.markdown("---")
-        st.metric("Normal route steps", len(normal_route))
-        st.metric("Safe route steps",   len(safe_route))
-
+        st.metric("Normal route steps", st.session_state.normal_steps)
+        st.metric("Safe route steps",   st.session_state.safe_steps)
 else:
     st.info("👈 Adjust flood conditions on the left sidebar, then click the button!")
     m = folium.Map(location=[12.9784, 77.6408], zoom_start=14)
